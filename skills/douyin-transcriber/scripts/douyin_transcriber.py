@@ -26,6 +26,21 @@ if FFMPEG_DIR:
     os.environ["PATH"] = FFMPEG_DIR + os.pathsep + os.environ.get("PATH", "")
 
 
+def to_simplified(text: str) -> str:
+    """Convert Traditional Chinese to Simplified. Tries multiple libs."""
+    try:
+        from opencc import OpenCC
+        return OpenCC("t2s").convert(text)
+    except Exception:
+        pass
+    try:
+        from zhconv import convert as zh_convert
+        return zh_convert(text, "zh-cn")
+    except Exception:
+        pass
+    return text  # fallback: return as-is
+
+
 async def recv_until(ws, tid, timeout=8):
     t0 = time.time()
     while time.time() - t0 < timeout:
@@ -169,19 +184,12 @@ def extract_audio(video_path: str, audio_path: str) -> None:
 
 
 def transcribe(audio_path: str, model_name: str = "tiny") -> str:
-    """Transcribe audio with Whisper."""
+    """Transcribe audio with Whisper, output Simplified Chinese."""
     print(f"  [5/5] Transcribing (model={model_name})...")
     import whisper
     model = whisper.load_model(model_name)
     result = model.transcribe(audio_path, language="zh")
-    text = result["text"]
-    # Convert Traditional Chinese to Simplified
-    try:
-        from opencc import OpenCC
-        cc = OpenCC("t2s")
-        text = cc.convert(text)
-    except Exception:
-        pass
+    text = to_simplified(result["text"])
     print(f"       {len(text)} chars transcribed")
     return text
 
