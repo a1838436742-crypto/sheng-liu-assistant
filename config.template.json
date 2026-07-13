@@ -1,8 +1,0 @@
-{
-    "defaultRatio": 0.1,
-    "api_key": "sk-你的DeepSeekKey",
-    "free_api_key": "你的智谱GLMKey",
-    "platform_email": "你的DeepSeek账号",
-    "platform_password": "你的DeepSeek密码",
-    "free_provider": "glm-4-flash"
-}

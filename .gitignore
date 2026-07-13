@@ -1,1 +1,13 @@
-{{GITIGNORE_CONTENT}}
+﻿config.json
+.cost_baseline.json
+.cache/
+.deepseek_export*
+audit_logs/
+test_pkg/node_modules/
+test_pkg/.playwright/
+__pycache__/
+*.pyc
+*.log
+outputs/
+
+machine.json
