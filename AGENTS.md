@@ -17,10 +17,55 @@
 - **验证**: 调一次 GLM-4-Flash 确认免费通道，调一次 DeepSeek 确认付费通道
 - 全部完成后输出"部署完成 + 总耗时"
 
+## Rule 1: Input Preprocess
+- Never put raw HTML into API
+- Use link-video-saver.js to extract text locally first
+
+## Rule 2: Output
+- Append: only return code, no markdown, no explanation
+- max_tokens: userscript=1200, bugfix=500, crawler=2000, default=1500
+
+## Rule 3: Cache
+- Use api-optimizer.js v3.0 unified prefix
+
+## Rule 4: Off-peak
+- Batch tasks at 18:00-09:00 or 12:00-14:00
+
+## Rule 5: Template
+- Check templates/ before generating
+
+## Link/Video
+- Use link-video-saver.js first, 7-day cache
+
+## Context Compression
+- Dont repeat done work, prioritize latest question
+
 ## 铁律7: 绝不碰用户浏览器
 - 禁止 taskkill /F /IM chrome.exe
 - 启动浏览器用独立 --user-data-dir
 - 只关闭自己启动的实例，用完即焚
+
+## 铁律8: 用完即焚
+- 启动的进程/浏览器跟踪PID，结束后关闭
+
+## 铁律9: DeepSeek 费用页面
+- 访问 platform.deepseek.com/usage 时自动用 config.json 账号密码登录
+- 登录流程: sign_in → 密码登录 → 填账号密码 → 跳转 usage
+
+## 铁律10: 全量审计
+- node full-audit.js → 自动登录 DeepSeek 平台抓累计 → 对比快照
+- 平台快照 100% 准确，包含所有并行任务总和
+
+## 铁律11: 审计数据纯净
+- 用户请求 _origin: "user"，系统调用 _origin: "system"
+- full-audit.js 分离"实际任务"和"系统测试"
+
+## 铁律12: 模型与 Key 配置
+- 当前主模型: deepseek-v4-flash（备用）
+- Codex++ 代理使用 Key: sk-4af3a...（平台名称"open ai"）
+
+## 铁律13: API Key 费用拆分
+- node key-split-report.js → 按 Key 拆分的详细费用
 
 ## 铁律14: DeepSeek 只能看文字
 - 不支持图片/音频/视频/文件直接输入
