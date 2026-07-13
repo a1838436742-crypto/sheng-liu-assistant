@@ -1,17 +1,44 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """douyin_transcriber.py - Download Douyin video and transcribe audio."""
 
-import asyncio, json, time, subprocess, tempfile, base64
+import asyncio, json, time, subprocess, tempfile
 import urllib.request, http.client, websockets, os, sys, argparse, re
+import shutil
 
-CHROME_PATH = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
-FFMPEG_DIR = r"C:\Users\%USERNAME%\AppData\Local\JianyingPro\Apps\10.9.0.14199"
-FFMPEG_PATH = os.path.join(FFMPEG_DIR, "ffmpeg.exe")
+# Auto-detect Chrome
+CHROME_CANDIDATES = [
+    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    os.path.expanduser(r"~\AppData\Local\Google\Chrome\Application\chrome.exe"),
+]
+CHROME_PATH = None
+for p in CHROME_CANDIDATES:
+    if os.path.exists(p):
+        CHROME_PATH = p
+        break
+if not CHROME_PATH:
+    CHROME_PATH = shutil.which("chrome") or shutil.which("google-chrome") or "chrome.exe"
 
-os.environ["PATH"] = FFMPEG_DIR + os.pathsep + os.environ.get("PATH", "")
+# Auto-detect ffmpeg
+FFMPEG_PATH = shutil.which("ffmpeg") or shutil.which("ffmpeg.exe") or "ffmpeg"
+FFMPEG_DIR = os.path.dirname(FFMPEG_PATH) if os.path.exists(FFMPEG_PATH) else ""
+if FFMPEG_DIR:
+    os.environ["PATH"] = FFMPEG_DIR + os.pathsep + os.environ.get("PATH", "")
 
-import whisper
-from zhconv import convert as zh_convert
+
+def to_simplified(text: str) -> str:
+    """Convert Traditional Chinese to Simplified. Tries multiple libs."""
+    try:
+        from opencc import OpenCC
+        return OpenCC("t2s").convert(text)
+    except Exception:
+        pass
+    try:
+        from zhconv import convert as zh_convert
+        return zh_convert(text, "zh-cn")
+    except Exception:
+        pass
+    return text  # fallback: return as-is
 
 
 async def recv_until(ws, tid, timeout=8):
@@ -43,6 +70,7 @@ async def js_str(ws, expr, num, timeout=30):
 
 
 async def extract_douyin(share_url: str) -> dict:
+    """Use headless Chrome to extract video metadata."""
     result = {"url": share_url}
     ud = tempfile.mkdtemp()
     proc = await asyncio.create_subprocess_exec(
@@ -70,9 +98,20 @@ async def extract_douyin(share_url: str) -> dict:
         result["page_url"] = page_url
 
         vid_match = re.search(r"/video/(\d+)", page_url)
-        if not vid_match:
+        modal_match = re.search(r"[?&]modal_id=(\d+)", page_url)
+        if vid_match:
+            video_id = vid_match.group(1)
+        elif modal_match:
+            video_id = modal_match.group(1)
+            print(f"       Detected modal_id, navigating to /video/{video_id}")
+            await ws.send(json.dumps({
+                "id": 5, "method": "Page.navigate",
+                "params": {"url": f"https://www.douyin.com/video/{video_id}"}
+            }))
+            await recv_until(ws, 5, 15)
+            await asyncio.sleep(4)
+        else:
             raise ValueError(f"Could not find video ID in URL: {page_url}")
-        video_id = vid_match.group(1)
         result["video_id"] = video_id
 
         print("  [2/5] Fetching video info from API...")
@@ -94,16 +133,19 @@ async def extract_douyin(share_url: str) -> dict:
         info = json.loads(raw)
         result.update(info)
         dur_s = info["duration"] // 1000
-        print(f"       {info['author']} | {dur_s}s | {info['desc'][:50]}...")
+        print(f"       Title: {info['desc'][:60]}...")
+        print(f"       Author: {info['author']} | Duration: {dur_s}s")
 
         raw_cookies = await js_str(ws, "document.cookie", 4, 5)
         result["cookies"] = raw_cookies
 
     proc.kill()
+    proc.wait()
     return result
 
 
 def download_video(dl_url: str, cookies: str, output_path: str) -> None:
+    """Download video using Python requests with browser cookies."""
     import requests as req
     print("  [3/5] Downloading video...")
     s = req.Session()
@@ -119,29 +161,35 @@ def download_video(dl_url: str, cookies: str, output_path: str) -> None:
     resp = s.get(dl_url, timeout=120, stream=True)
     if resp.status_code != 200:
         raise RuntimeError(f"Download failed: HTTP {resp.status_code}")
+
     with open(output_path, "wb") as f:
         for chunk in resp.iter_content(chunk_size=8192):
-            if chunk: f.write(chunk)
+            if chunk:
+                f.write(chunk)
     size = os.path.getsize(output_path)
     print(f"       {size/1024/1024:.1f}MB downloaded")
 
 
 def extract_audio(video_path: str, audio_path: str) -> None:
+    """Extract audio from video using ffmpeg."""
     print("  [4/5] Extracting audio...")
     subprocess.run(
         [FFMPEG_PATH, "-i", video_path, "-vn",
          "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
          audio_path, "-y"],
-        capture_output=True, timeout=300
+        capture_output=True, timeout=180
     )
-    print(f"       {os.path.getsize(audio_path)/1024/1024:.1f}MB audio extracted")
+    size = os.path.getsize(audio_path)
+    print(f"       {size/1024/1024:.1f}MB audio extracted")
 
 
 def transcribe(audio_path: str, model_name: str = "tiny") -> str:
+    """Transcribe audio with Whisper, output Simplified Chinese."""
     print(f"  [5/5] Transcribing (model={model_name})...")
+    import whisper
     model = whisper.load_model(model_name)
     result = model.transcribe(audio_path, language="zh")
-    text = zh_convert(result["text"], "zh-cn")
+    text = to_simplified(result["text"])
     print(f"       {len(text)} chars transcribed")
     return text
 
@@ -149,36 +197,55 @@ def transcribe(audio_path: str, model_name: str = "tiny") -> str:
 def main():
     parser = argparse.ArgumentParser(description="Douyin video to transcript")
     parser.add_argument("url", help="Douyin share URL")
-    parser.add_argument("--model", default="tiny", choices=["tiny","base","small","medium","large"])
-    parser.add_argument("--keep-files", action="store_true")
+    parser.add_argument("--output-dir", default=os.path.expanduser("~/Desktop"),
+                        help="Output directory (default: Desktop)")
+    parser.add_argument("--model", default="tiny",
+                        choices=["tiny", "base", "small", "medium", "large"],
+                        help="Whisper model size (default: tiny)")
+    parser.add_argument("--keep-files", action="store_true",
+                        help="Keep video/audio files after transcription")
     args = parser.parse_args()
 
-    output_dir = os.getcwd()
+    output_dir = args.output_dir
+    os.makedirs(output_dir, exist_ok=True)
+
     video_path = os.path.join(output_dir, "douyin_video.mp4")
     audio_path = os.path.join(output_dir, "douyin_audio.wav")
     transcript_path = os.path.join(output_dir, "douyin_transcript.txt")
 
     t0 = time.time()
+
     try:
         info = asyncio.run(extract_douyin(args.url))
         download_video(info["dl_url"], info["cookies"], video_path)
         extract_audio(video_path, audio_path)
         text = transcribe(audio_path, args.model)
+
         with open(transcript_path, "w", encoding="utf-8") as f:
             f.write(text)
+
         elapsed = time.time() - t0
         print(f"\nDone in {elapsed:.0f}s")
-        print(f"Transcript saved to {transcript_path}")
+        print(f"Transcript ({len(text)} chars) saved to {transcript_path}")
+        print(f"\nSummary:")
+        print(f"  Title: {info.get('desc', '')}")
+        print(f"  Author: {info.get('author', '')}")
+        print(f"  Duration: {info.get('duration', 0)//1000}s")
+        print(f"\nTranscript (first 500 chars):")
+        print(text[:500] + ("..." if len(text) > 500 else ""))
+
         if not args.keep_files:
             for f in [video_path, audio_path]:
-                if os.path.exists(f): os.remove(f)
-            print("Temp files cleaned up")
+                if os.path.exists(f):
+                    os.remove(f)
+            print("\nTemp files cleaned up (use --keep-files to retain)")
+
     except Exception as e:
         print(f"\nError: {e}")
         return 1
+
     return 0
 
 
 if __name__ == "__main__":
     sys.exit(main())
-
