@@ -1,19 +1,34 @@
-// Cost Diff - \u8d39\u7528\u5dee\u5f02\u5206\u6790\nconst audit = require("./audit-client.js");
-
-function main() {
-  var records = audit.loadHistory();
-  if (records.length < 2) {
-    console.log("\u6570\u636e\u4e0d\u8db3\uff0c\u81f3\u5c11\u9700\u89812\u6761\u8bb0\u5f55");
-    return;
-  }
-  
-  var first = records[0];
-  var last = records[records.length - 1];
-  
-  console.log("=== \u8d39\u7528\u5dee\u5f02 ===");
-  console.log("\u65f6\u95f4: " + first.timestamp + " ~ " + last.timestamp);
-  console.log("\u6d88\u8d39\u589e\u91cf: " + (parseFloat(last.cost || 0) - parseFloat(first.cost || 0)).toFixed(2));
-  console.log("Token\u589e\u91cf: " + (parseInt(last.output_tokens || 0) - parseInt(first.output_tokens || 0)));
-}
-
-main();
+﻿// cost-diff.js — 与基线对比，看这次"猛操"花了多少
+const audit = require("./audit-client.js");
+const fs = require("fs"), path = require("path");
+var baseline = JSON.parse(fs.readFileSync(path.join(__dirname, ".cost_baseline.json"), "utf-8"));
+var records = audit.loadHistory();
+var current = null;
+records.forEach(function(r) {
+  if (r.task_type !== "【平台快照】") return;
+  var p = r.prompt_preview || "";
+  var c = p.match(/消费¥([\d.]+)/), q = p.match(/请求([\d,]+)/), t = p.match(/Token([\d,]+)/);
+  current = { 
+    ts: r.timestamp, 
+    cost: parseFloat((c ? c[1] : "0").replace(/,/g, "")), 
+    req: parseFloat((q ? q[1] : "0").replace(/,/g, "")), 
+    tok: parseFloat((t ? t[1] : "0").replace(/,/g, "")) 
+  };
+});
+if (!current) { console.log("没有最新快照，先跑 full-audit.js"); process.exit(1); }
+var delta = {
+  cost: current.cost - baseline.cost,
+  req: current.req - baseline.req,
+  tok: current.tok - baseline.tok
+};
+console.log("╔══════════════════════════════════════╗");
+console.log("║      本次操作消耗报告                ║");
+console.log("╚══════════════════════════════════════╝");
+console.log("基线: " + baseline.ts);
+console.log("当前: " + current.ts);
+console.log("");
+console.log("  费用:     ¥" + delta.cost.toFixed(4));
+console.log("  请求:     " + delta.req + " 次");
+console.log("  Token:    " + delta.tok.toLocaleString());
+console.log("  均次费用: ¥" + (delta.req > 0 ? (delta.cost / delta.req).toFixed(6) : "0"));
+console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");

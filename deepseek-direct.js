@@ -1,54 +1,88 @@
-// DeepSeek 直连模块
-// 用法: nodeRepl 中 dynamic import
+﻿// deepseek-direct.js — 从 js kernel 直接调 DeepSeek API（不经过 proxy）
+// 不走 config.toml，不重启 Codex
+// 
+// 用法 (js kernel):
+//   var ds = await import("C:/Users/DEWK/Documents/省流助手v3.0/deepseek-direct.js");
+//   var r = await ds.ask("写个爬虫脚本");
+//   nodeRepl.write(r);
 
-const https = require("https");
-const fs = require("fs");
-const path = require("path");
+const https = await import("https");
+const fs = await import("fs");
+var cfg = JSON.parse(
+  fs.readFileSync("C:/Users/DEWK/Documents/省流助手v3.0/config.json", "utf-8").replace(/^\uFEFF/, "")
+);
+const KEY = cfg.api_key;  // sk-4af3a...
 
-function getConfig() {
-  try {
-    var p = path.join(__dirname, "config.json");
-    return JSON.parse(fs.readFileSync(p, "utf-8").replace(/^\uFEFF/, ""));
-  } catch(e) { return {}; }
-}
-
-module.exports = async function(prompt, options) {
-  options = options || {};
-  var cfg = getConfig();
-  var apiKey = cfg.api_key || process.env.DEEPSEEK_API_KEY;
-  if (!apiKey) throw new Error("DeepSeek API Key 未配置");
-
+async function ask(prompt, opts) {
+  var maxTokens = opts?.max_tokens || 2000;
   var body = JSON.stringify({
-    model: options.model || "deepseek-chat",
-    messages: Array.isArray(prompt) ? prompt : [{ role: "user", content: prompt }],
-    max_tokens: options.max_tokens || 4000,
-    temperature: options.temperature || 0.7,
-    stream: false
+    model: "deepseek-v4-flash",
+    messages: [{ role: "user", content: prompt }],
+    max_tokens: maxTokens,
+    temperature: 0.7,
+    stream: false,
   });
-
-  return new Promise((ok, fail) => {
-    var req = https.request({
-      hostname: "api.deepseek.com",
-      port: 443,
-      path: "/chat/completions",
-      method: "POST",
+  return new Promise(function(ok, fail) {
+    var r = https.request({
+      hostname: "api.deepseek.com", port: 443,
+      path: "/v1/chat/completions", method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": "Bearer " + apiKey,
-        "Content-Length": Buffer.byteLength(body)
+        "Authorization": "Bearer " + KEY,
+        "Content-Length": Buffer.byteLength(body),
       },
-      timeout: options.timeout || 60000
-    }, res => {
+      timeout: 120000,
+    }, function(res) {
       var d = "";
-      res.on("data", c => d += c);
-      res.on("end", () => {
-        try { ok(JSON.parse(d)); }
-        catch(e) { ok({ error: e.message, raw: d }); }
+      res.on("data", function(c) { d += c; });
+      res.on("end", function() {
+        try {
+          var j = JSON.parse(d);
+          ok(j.choices?.[0]?.message?.content || "");
+        } catch(e) { fail(e.message); }
       });
     });
-    req.on("error", fail);
-    req.on("timeout", () => { req.destroy(); fail(new Error("timeout")); });
-    req.write(body);
-    req.end();
+    r.on("error", fail);
+    r.on("timeout", function() { r.destroy(); fail("timeout"); });
+    r.write(body);
+    r.end();
   });
-};
+}
+
+async function askWithMessages(messages, opts) {
+  var maxTokens = opts?.max_tokens || 2000;
+  var body = JSON.stringify({
+    model: "deepseek-v4-flash",
+    messages: messages,
+    max_tokens: maxTokens,
+    temperature: 0.7,
+    stream: false,
+  });
+  return new Promise(function(ok, fail) {
+    var r = https.request({
+      hostname: "api.deepseek.com", port: 443,
+      path: "/v1/chat/completions", method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer " + KEY,
+        "Content-Length": Buffer.byteLength(body),
+      },
+      timeout: 120000,
+    }, function(res) {
+      var d = "";
+      res.on("data", function(c) { d += c; });
+      res.on("end", function() {
+        try {
+          var j = JSON.parse(d);
+          ok(j.choices?.[0]?.message?.content || "");
+        } catch(e) { fail(e.message); }
+      });
+    });
+    r.on("error", fail);
+    r.on("timeout", function() { r.destroy(); fail("timeout"); });
+    r.write(body);
+    r.end();
+  });
+}
+
+export { ask, askWithMessages };

@@ -1,0 +1,5 @@
+{
+  "name": "自动点击器",
+  "type": "userscript",
+  "systemPrompt": "你是一个油猴脚本生成器。目标页面：${targetUrl}。功能：${action}。"
+}
