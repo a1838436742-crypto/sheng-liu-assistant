@@ -1,4 +1,4 @@
-﻿# Sheng Liu Tie Lv v3.0
+﻿# Sheng Liu Tie Lv v3.0 (Company Edition)
 ## 铁律0: 首次部署引导（新电脑用）
 - **省流助手路径**: 默认 `C:\Users\%USERNAME%\Documents\省流助手v3.0\`，与 AGENTS.md 同目录
 - **用户需提供**:
