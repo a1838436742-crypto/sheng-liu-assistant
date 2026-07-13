@@ -1,4 +1,4 @@
-﻿config.json
+config.json
 .cost_baseline.json
 .cache/
 .deepseek_export*
@@ -9,3 +9,12 @@ __pycache__/
 *.pyc
 *.log
 outputs/
+node_modules/
+.chrome_profile/
+.deepseek_cookies.json
+deepseek_export.csv
+deepseek_export.zip
+*.pid
+*.png
+*.avi
+*.mp4
