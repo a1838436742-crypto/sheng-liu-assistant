@@ -74,31 +74,33 @@
 - **输出**: 桌面 `douyin_transcript.txt`（默认 tiny 模型 ~40s）
 - **注意**: 需要 ffmpeg；视频/音频自动清理
 
-## 铁律19: Git 双分支隔离（家里 vs 公司）
-### 身份识别
-- **本机是 🏠 家里机** → 默认分支 `main`
-- **公司机是 💼 公司机** → 默认分支 `company`
-- 每次运行先确认当前分支：`git branch --show-current`
-  - 家里机不在 `main` → 切回 `main` 再操作
-  - 公司机不在 `company` → 切回 `company` 再操作
+## 铁律19: 机器身份识别 + Git 双分支同步
+### 身份识别（自动，无需人工判断）
+- 每台机器首次部署时自动创建 machine.json（已加入 .gitignore，不同步）
+- 内容格式：`{"guid": "本机 MachineGuid", "role": "company/home"}`
+- **AI 每次运行先读 machine.json 的 role 字段**：
+  - role = company → 公司机，默认分支 company
+  - role = home → 家里机（本机），默认分支 main
+- **不在自己分支时** → git checkout 切回去再操作
+- 如果没有 machine.json → 触发 铁律0 引导创建
 
 ### 分支职责
 | 分支 | 谁在用 | 推送方式 |
 |------|--------|----------|
-| `main` | 🏠 家里 AI（本机） | 本机直接 push |
-| `company` | 💼 公司 AI | 公司机 push |
+| main | role=home 的机器（本机） | 本机直接 push |
+| company | role=company 的机器 | 公司机 push |
 
 ### 同步规则
 - **同步公司内容** → 用户说"同步公司"时执行：
-  1. `git fetch origin company` 拉取公司最新版
-  2. 比对 `main` vs `origin/company`，列出差异
-  3. 合并公司需要的改动到 `main`
+  1. git fetch origin company 拉取公司最新版
+  2. 比对 main vs origin/company，列出差异
+  3. 合并公司需要的改动到 main
 - **同步家里内容** → 公司 AI 看到"同步家里"时：
-  1. `git fetch origin main`
-  2. 比对 `company` vs `origin/main`
-  3. 合并家里需要的改动到 `company`
+  1. git fetch origin main
+  2. 比对 company vs origin/main
+  3. 合并家里需要的改动到 company
 
 ### 注意事项
-- `AGENTS.md` 在不同分支内容不同（身份声明不同），**merge 时不要覆盖对方的 AGENTS.md**
-- `config.json` 在 `.gitignore` 中，每台机器各自配置，不会冲突
-- 铁律更新后记得 `git push`，对方 `git pull` 后自动同步
+- AGENTS.md merge 时不要覆盖对方的版本（各自维护）
+- config.json、machine.json 都在 .gitignore，各自配置
+- 铁律更新后 git push，对方 git pull 后自动同步
