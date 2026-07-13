@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """douyin_transcriber.py - Download Douyin video and transcribe audio."""
 
 import asyncio, json, time, subprocess, tempfile, base64
@@ -11,6 +11,7 @@ FFMPEG_PATH = os.path.join(FFMPEG_DIR, "ffmpeg.exe")
 os.environ["PATH"] = FFMPEG_DIR + os.pathsep + os.environ.get("PATH", "")
 
 import whisper
+from zhconv import convert as zh_convert
 
 
 async def recv_until(ws, tid, timeout=8):
@@ -140,7 +141,7 @@ def transcribe(audio_path: str, model_name: str = "tiny") -> str:
     print(f"  [5/5] Transcribing (model={model_name})...")
     model = whisper.load_model(model_name)
     result = model.transcribe(audio_path, language="zh")
-    text = result["text"]
+    text = zh_convert(result["text"], "zh-cn")
     print(f"       {len(text)} chars transcribed")
     return text
 
@@ -180,3 +181,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
