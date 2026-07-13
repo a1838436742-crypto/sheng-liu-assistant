@@ -135,3 +135,32 @@
 
 
 
+
+## 铁律19: Git 双分支隔离（公司 vs 家里）
+### 身份识别（文件头检测）
+- **本机是 💼 公司机** → 默认分支 company
+- **家里机是 🏠 家里机** → 默认分支 main
+- 每次运行先确认当前分支：git branch --show-current
+  - 公司机不在 company → 切回 company 再操作
+  - 家里机不在 main → 切回 main 再操作
+
+### 分支职责
+| 分支 | 谁在用 | 推送方式 |
+|------|--------|----------|
+| main | 🏠 家里 AI | 家里机直接 push |
+| company | 💼 公司 AI（本机） | 本机直接 push |
+
+### 同步规则
+- **同步家里内容** → 用户说"同步家里"时执行：
+  1. git fetch origin main 拉取家里最新版
+  2. 比对 company vs origin/main，列出差异
+  3. 合并家里需要的改动到 company
+- **同步公司内容** → 家里 AI 看到"同步公司"时：
+  1. git fetch origin company
+  2. 比对 main vs origin/company
+  3. 合并公司需要的改动到 main
+
+### 注意事项
+- AGENTS.md 在不同分支内容不同（身份声明不同），**merge 时不要覆盖对方的 AGENTS.md**
+- config.json 在 .gitignore 中，每台机器各自配置，不会冲突
+- 铁律更新后记得 git push，对方 git pull 后自动同步
