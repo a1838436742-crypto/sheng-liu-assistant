@@ -83,9 +83,20 @@ async def extract_douyin(share_url: str) -> dict:
         result["page_url"] = page_url
 
         vid_match = re.search(r"/video/(\d+)", page_url)
-        if not vid_match:
+        modal_match = re.search(r"[?&]modal_id=(\d+)", page_url)
+        if vid_match:
+            video_id = vid_match.group(1)
+        elif modal_match:
+            video_id = modal_match.group(1)
+            print(f"       Detected modal_id, navigating to /video/{video_id}")
+            await ws.send(json.dumps({
+                "id": 5, "method": "Page.navigate",
+                "params": {"url": f"https://www.douyin.com/video/{video_id}"}
+            }))
+            await recv_until(ws, 5, 15)
+            await asyncio.sleep(4)
+        else:
             raise ValueError(f"Could not find video ID in URL: {page_url}")
-        video_id = vid_match.group(1)
         result["video_id"] = video_id
 
         print("  [2/5] Fetching video info from API...")
@@ -164,6 +175,13 @@ def transcribe(audio_path: str, model_name: str = "tiny") -> str:
     model = whisper.load_model(model_name)
     result = model.transcribe(audio_path, language="zh")
     text = result["text"]
+    # Convert Traditional Chinese to Simplified
+    try:
+        from opencc import OpenCC
+        cc = OpenCC("t2s")
+        text = cc.convert(text)
+    except Exception:
+        pass
     print(f"       {len(text)} chars transcribed")
     return text
 
