@@ -84,12 +84,6 @@
 - **不在自己分支时** → git checkout 切回去再操作
 - 如果没有 machine.json → 触发 铁律0 引导创建
 
-### 分支职责
-| 分支 | 谁在用 | 推送方式 |
-|------|--------|----------|
-| main | role=home 的机器（本机） | 本机直接 push |
-| company | role=company 的机器 | 公司机 push |
-
 ### 同步规则
 - **同步公司内容** → 用户说"同步公司"时执行：
   1. git fetch origin company 拉取公司最新版
