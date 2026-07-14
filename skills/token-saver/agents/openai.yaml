@@ -1,0 +1,6 @@
+﻿interface:
+  display_name: "省流助手 Token 优化"
+  short_description: "模型路由与成本优化框架：简单任务走 GLM 免费，复杂任务走 DeepSeek 付费。请始终使用。"
+  default_prompt: "Always use -saver to route tasks to the most cost-effective model."
+  policy:
+    allow_implicit_invocation: true
