@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """douyin_transcriber.py - Download Douyin video and transcribe audio."""
 
 import asyncio, json, time, subprocess, tempfile
@@ -183,12 +183,12 @@ def extract_audio(video_path: str, audio_path: str) -> None:
     print(f"       {size/1024/1024:.1f}MB audio extracted")
 
 
-def transcribe(audio_path: str, model_name: str = "tiny") -> str:
+def transcribe(audio_path: str, model_name: str = "base") -> str:
     """Transcribe audio with Whisper, output Simplified Chinese."""
     print(f"  [5/5] Transcribing (model={model_name})...")
     import whisper
     model = whisper.load_model(model_name)
-    result = model.transcribe(audio_path, language="zh")
+    result = model.transcribe(audio_path, language="zh", initial_prompt="以下是普通话的中文语音内容，请准确转录为简体中文。")
     text = to_simplified(result["text"])
     print(f"       {len(text)} chars transcribed")
     return text
@@ -199,9 +199,9 @@ def main():
     parser.add_argument("url", help="Douyin share URL")
     parser.add_argument("--output-dir", default=os.path.expanduser("~/Desktop"),
                         help="Output directory (default: Desktop)")
-    parser.add_argument("--model", default="tiny",
+    parser.add_argument("--model", default="base",
                         choices=["tiny", "base", "small", "medium", "large"],
-                        help="Whisper model size (default: tiny)")
+                        help="Whisper model size (default: base, tiny=faster/less accurate)")
     parser.add_argument("--keep-files", action="store_true",
                         help="Keep video/audio files after transcription")
     args = parser.parse_args()
@@ -249,3 +249,6 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+
