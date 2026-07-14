@@ -1,0 +1,4 @@
+﻿interface:
+  display_name: "抖音视频转文字"
+  short_description: "下载抖音视频并转成文字稿（简体中文），支持 GLM 免费 AI 总结"
+  default_prompt: "Use -transcriber to download and transcribe this Douyin video."
