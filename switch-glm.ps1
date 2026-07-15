@@ -1,36 +1,61 @@
-﻿# ⚠️ 已废弃 — 不再需要手动切换和重启
-# 现在 config.toml 默认指向 GLM 代理 (57330)，日常对话走免费
-# 复杂任务由 Codex 在对话内自动用 deepseek-direct.js 直连 DeepSeek
-# 删除此脚本前请确认 .codex\AGENTS.md 中的铁律17已生效
-# 切换到 GLM（免费模型）
-# 只改 base_url，不碰其他配置段
+﻿# 切换回 GLM 免费模型
+# 自动检测 Codex 的 Node.js 路径
 
 $configPath = "$env:USERPROFILE\.codex\config.toml"
-Write-Output "正在切换至 GLM 免费模型..."
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-# 1. 确保 GLM 代理在运行
-$nodePath = "C:\Users\DEWK\AppData\Local\OpenAI\Codex\runtimes\cua_node\ecfc0d9aa02807e3\bin\node.exe"
-$proxyPath = "C:\Users\DEWK\Documents\省流助手v3.0\glm-proxy.js"
-$existing = Get-NetTCPConnection -LocalPort 57330 -ErrorAction SilentlyContinue
-if ($existing -and $existing.Count -gt 0) {
-  $oldPid = $existing[0].OwningProcess
-  Stop-Process -Id $oldPid -Force -ErrorAction SilentlyContinue
-  Start-Sleep -Seconds 1
-  Write-Output "  已关闭旧 GLM 代理 (PID $oldPid)"
+Write-Output "正在切换到 GLM 免费通道..."
+
+# 1. 先关掉图片过滤代理（57222 端口被 GLM 代理占用）
+$existingFilter = Get-NetTCPConnection -LocalPort 57322 -ErrorAction SilentlyContinue
+if ($existingFilter -and $existingFilter.Count -gt 0) {
+    Stop-Process -Id $existingFilter[0].OwningProcess -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 1
 }
-Start-Process -WindowStyle Hidden -FilePath $nodePath -ArgumentList "`"$proxyPath`""
-Start-Sleep -Seconds 2
-Write-Output "  ✅ GLM 代理已启动 (127.0.0.1:57330)"
 
-# 2. 只改 config.toml 中的 base_url 行（不改其他配置）
+# 2. 自动检测 Node.js
+$nodePath = $null
+$candidates = @(
+    "$env:LOCALAPPDATA\Programs\Codex\resources\bin\node.exe",
+    "$env:LOCALAPPDATA\OpenAI\Codex\runtimes\cua_node\*\bin\node.exe",
+    "$env:USERPROFILE\AppData\Local\Programs\Codex\resources\bin\node.exe",
+    "C:\Program Files\nodejs\node.exe"
+)
+foreach ($c in $candidates) {
+    $resolved = Resolve-Path $c -ErrorAction SilentlyContinue
+    if ($resolved) { $nodePath = $resolved.Path; break }
+}
+
+if ($nodePath) {
+    # 启动 GLM 代理（监听 57330）
+    $glmProxy = Join-Path $scriptDir "glm-proxy.js"
+    if (Test-Path $glmProxy) {
+        $existingGLM = Get-NetTCPConnection -LocalPort 57330 -ErrorAction SilentlyContinue
+        if ($existingGLM -and $existingGLM.Count -gt 0) {
+            Stop-Process -Id $existingGLM[0].OwningProcess -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 1
+        }
+        Start-Process -WindowStyle Hidden -FilePath $nodePath -ArgumentList "`"$glmProxy`""
+        Start-Sleep -Seconds 2
+
+        # 启动图片过滤代理（监听 57322，转发到 GLM 代理 57330）
+        $filterPath = Join-Path $scriptDir "image-filter-proxy.js"
+        if (Test-Path $filterPath) {
+            Start-Process -WindowStyle Hidden -FilePath $nodePath -ArgumentList "`"$filterPath`""
+            Start-Sleep -Seconds 2
+        }
+        Write-Output "  ✅ GLM 代理已启动 (127.0.0.1:57330)"
+    }
+} else {
+    Write-Warning "未找到 Node.js，跳过代理启动"
+}
+
+# 3. 改 config.toml
 $config = Get-Content $configPath -Raw
-$config = $config -replace '(base_url\s*=\s*")[^"]+(")', '${1}http://127.0.0.1:57330/v1${2}'
+$config = $config -replace '(base_url\s*=\s*")[^"]+(")', '${1}http://127.0.0.1:57322/v1${2}'
 $config | Set-Content $configPath -Encoding UTF8 -NoNewline
-Write-Output "  ✅ 已切换 base_url → 127.0.0.1:57330 (GLM)"
+Write-Output "  ✅ 已切换 base_url → 127.0.0.1:57322 (GLM 代理)"
 
-# 3. 提示
 Write-Output ""
 Write-Output "请重启 Codex 桌面端生效"
-Write-Output "之后所有对话走 GLM-4-Flash（免费），图片走 GLM-4V"
 Write-Output "切回付费: 运行 switch-deepseek.ps1"
-

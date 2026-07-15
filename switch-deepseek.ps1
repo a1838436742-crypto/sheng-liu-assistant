@@ -1,36 +1,48 @@
-﻿# ⚠️ 已废弃 — 不再需要手动切换和重启
-# 现在 config.toml 默认指向 GLM 代理 (57330)，日常对话走免费
-# 复杂任务由 Codex 在对话内自动用 deepseek-direct.js 直连 DeepSeek
-# 删除此脚本前请确认 .codex\AGENTS.md 中的铁律17已生效
-# 切换回 DeepSeek V4 Flash（付费）
-# 只改 base_url，不碰其他配置段
+﻿# 切换回 DeepSeek V4 Flash（付费）
+# 自动检测 Codex 的 Node.js 路径
 
 $configPath = "$env:USERPROFILE\.codex\config.toml"
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+
 Write-Output "正在切换回 DeepSeek V4 Flash..."
 
-# 1. 确保图片过滤代理在运行
-$nodePath = "C:\Users\DEWK\AppData\Local\OpenAI\Codex\runtimes\cua_node\ecfc0d9aa02807e3\bin\node.exe"
-$filterPath = "C:\Users\DEWK\Documents\省流助手v3.0\image-filter-proxy.js"
-$existing = Get-NetTCPConnection -LocalPort 57322 -ErrorAction SilentlyContinue
-if ($existing -and $existing.Count -gt 0) {
-  $oldPid = $existing[0].OwningProcess
-  Stop-Process -Id $oldPid -Force -ErrorAction SilentlyContinue
-  Start-Sleep -Seconds 1
-  Write-Output "  已关闭旧过滤代理 (PID $oldPid)"
+# 1. 自动检测 Codex 自带的 Node.js
+$nodePath = $null
+$candidates = @(
+    "$env:LOCALAPPDATA\Programs\Codex\resources\bin\node.exe",
+    "$env:LOCALAPPDATA\OpenAI\Codex\runtimes\cua_node\*\bin\node.exe",
+    "$env:USERPROFILE\AppData\Local\Programs\Codex\resources\bin\node.exe",
+    "C:\Program Files\nodejs\node.exe"
+)
+foreach ($c in $candidates) {
+    $resolved = Resolve-Path $c -ErrorAction SilentlyContinue
+    if ($resolved) { $nodePath = $resolved.Path; break }
 }
-Start-Process -WindowStyle Hidden -FilePath $nodePath -ArgumentList "`"$filterPath`""
-Start-Sleep -Seconds 2
-Write-Output "  ✅ 图片过滤代理已启动 (127.0.0.1:57322)"
 
-# 2. 只改 config.toml 中的 base_url 行
+if (-not $nodePath) {
+    Write-Warning "未找到 Node.js，跳过图片过滤代理启动"
+} else {
+    # 启动图片过滤代理
+    $filterPath = Join-Path $scriptDir "image-filter-proxy.js"
+    if (Test-Path $filterPath) {
+        $existing = Get-NetTCPConnection -LocalPort 57322 -ErrorAction SilentlyContinue
+        if ($existing -and $existing.Count -gt 0) {
+            Stop-Process -Id $existing[0].OwningProcess -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 1
+        }
+        Start-Process -WindowStyle Hidden -FilePath $nodePath -ArgumentList "`"$filterPath`""
+        Start-Sleep -Seconds 2
+        Write-Output "  ✅ 图片过滤代理已启动 (127.0.0.1:57322)"
+    } else {
+        Write-Warning "未找到 image-filter-proxy.js，跳过过滤代理"
+    }
+}
+
+# 2. 改 config.toml
 $config = Get-Content $configPath -Raw
 $config = $config -replace '(base_url\s*=\s*")[^"]+(")', '${1}http://127.0.0.1:57322/v1${2}'
 $config | Set-Content $configPath -Encoding UTF8 -NoNewline
 Write-Output "  ✅ 已切换 base_url → 127.0.0.1:57322 (DeepSeek)"
 
-# 3. 提示
 Write-Output ""
 Write-Output "请重启 Codex 桌面端生效"
-Write-Output "发图不会再导致线程坏死（图片会被过滤代理拦截）"
-Write-Output "切回免费: 运行 switch-glm.ps1"
-

@@ -327,3 +327,20 @@ ffmpeg -i video.mp4 -i audio.m4a -c:v copy -c:a aac -map 0:v:0 -map 1:a:0 -short
 - **跨分支合并**：
   - 需要同步另一台机器的修改时：`git pull origin <对方分支>`
   - 或者直接在 GitHub 上开 PR 合并
+
+## 铁律33: 代理断流应急处理 (2026-07-15 新增)
+- **症状**: `stream disconnected before completion: error sending request for url (http://127.0.0.1:57322/v1/responses)`
+- **原因**: GLM 代理/图片过滤代理到上游 API 的连接不稳定或崩溃
+- **应急方案**:
+  - 优先运行 `.\switch-deepseek.ps1`（切回 DeepSeek 直连，重启 Codex 生效）
+  - 如果脚本缺失：手动改 `%USERPROFILE%\.codex\config.toml` 中 `base_url` 为 `http://127.0.0.1:57322/v1`
+  - 家里没有脚本 → `git pull origin home` 从仓库拉取
+- **恢复后**: 网络稳定后运行 `.\switch-glm.ps1` 切回省流模式
+- **快捷创建脚本**（如果连 git pull 都跑不了）：
+  ```powershell
+  # 一行命令切回 DeepSeek：
+  $c = Get-Content "$env:USERPROFILE\.codex\config.toml" -Raw
+  $c = $c -replace '''(base_url\s*=\s*")[^"]+(")''', '''${1}http://127.0.0.1:57322/v1${2}'''
+  $c | Set-Content "$env:USERPROFILE\.codex\config.toml" -Encoding UTF8 -NoNewline
+  Write-Host "已切换，重启 Codex 生效"
+  ```
