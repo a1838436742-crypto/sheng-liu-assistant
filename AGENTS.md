@@ -242,6 +242,78 @@ ffmpeg -i video.mp4 -i audio.m4a -c:v copy -c:a aac -map 0:v:0 -map 1:a:0 -short
 - 需要登录的平台：--cookies cookies.txt 带上用户导出的 cookie
 - Referer 设置：B站=https://www.bilibili.com/ YouTube=https://www.youtube.com/ 抖音=https://www.douyin.com/
 
+
+## 铁律31: 语音精剪经验总结 (2026-07-15 合并自公司分支)
+- **核心原则：物理切割 > 滤波器/门控**
+  - `noisereduce`（Python）会吞字（"的"被吃掉），禁止使用
+  - `agate` 门控会残留底噪（类似电流声），禁止使用
+  - `highpass`/`lowpass` 滤波会引入处理伪影，禁止使用
+  - 唯一正确方法：`silencedetect` 检测 → `atrim` 物理切除
+- **切割流程**：
+  1. Whisper 转写原始音频，与 Excel 脚本逐镜对照
+  2. 以脚本镜号为基准定义 keep segments（大段 = 隐藏 stutter）
+  3. 多段合并前必须确认衔接处没有卡壳/重复
+  4. 镜头切换处留 0.05-0.08s 间隔（`aevalsrc=0` 插入静音）
+  5. 拼接后用 `silencedetect=noise=-30dB:d=0.04` 检测气口
+  6. 物理切除气口（体积 = 0，非衰减），切除点加 0.002s 缓冲防爆音
+  7. 编码 AAC 192k，不重采样（保持 44100Hz）
+- **阈值参考**：
+  - -26dB：激进（容易切到字头），仅用于背景很干净的录音
+  - -28dB：适中（默认推荐），大部分录音适用
+  - -30dB：保守（只抓深呼吸），用于音量不稳定的录音
+- **时长预期**：
+  - 原始 169s → 机械粗剪 ~150s → 精剪 ~141s → 手动精修 ~133s
+  - 自动工具可达 90%，最后 10% 需要手动调整
+- **避坑**：
+  - 不要用 `volume=enable` 静音气口（产生硬切爆音）
+  - 不要一次性合并大段（>15s），内部 stutter 会被隐藏
+  - 气口检测的 `d`（最小持续时间）设 0.04 避免切到词内微顿
+  - 转写用 Whisper tiny 只是参考，实际切割点需用频谱/波形验证
+
+## 铁律32: GitHub 仓库配置与多机同步（Home Edition 适配版）
+- **仓库地址**：
+  - HTTPS: `https://github.com/a1838436742-crypto/sheng-liu-assistant.git`
+  - SSH: `git@github.com:a1838436742-crypto/sheng-liu-assistant.git`
+- **本机路径**: `C:\Users\18384\Documents\New project`
+- **角色分支策略**（基于 `machine.json` 中的 `role`，铁律19 继承）：
+  - `"role": "company"` → 操作 `company` 分支
+  - `"role": "home"` → 操作 `main` 分支（本机使用 `main` 而非 `home`）
+  - `"role": "family"` → 操作 `family` 分支
+- **日常同步流程**：
+  - 修改文件后：`git add → git commit → git push origin <当前分支>`
+  - 同步对方更新：`git pull origin <当前分支>`
+  - 首次克隆：`git clone https://github.com/a1838436742-crypto/sheng-liu-assistant.git`
+- **跨分支同步**（铁律19 补充操作指引）：
+  - 需要拉取公司机更新：`git fetch origin company` → 对比差异 → 合并到 `main`
+  - 需要拉取家里机更新（公司机操作）：`git fetch origin main` → 合并到 `company`
+  - 也可以在 GitHub 上开 PR 合并
+- **常见问题**：
+  - "没有找到已有的 Git 仓库" → 先 `cd` 到项目目录再操作
+  - HTTPS 在公司网络被墙 → 改用 SSH（公司机已配置密钥）
+  - 家里网络 SSH 不通 → 改用 HTTPS 或 `gh` CLI 认证
+
+## 铁律33: 代理断流应急处理 (2026-07-15 合并自公司分支)
+- **症状**: `stream disconnected before completion: error sending request for url (http://127.0.0.1:57322/v1/responses)`
+- **原因**: GLM 代理/图片过滤代理到上游 API 的连接不稳定或崩溃
+- **本机应急方案**（铁律17 永不切换原则的例外）：
+  - 如果 GLM 免费通道（JS kernel 直调 open.bigmodel.cn）超时 → 等待重试，最多 3 次
+  - 如果 57322 代理崩溃 → 检查 `node glm-proxy.js` 是否在运行，重启代理
+  - 如果 config.toml 被误改 → 手动确认 `base_url` 为 `http://127.0.0.1:57322/v1`
+- **快捷恢复命令**：
+  ```powershell
+  # 检查 config.toml 当前值
+  Select-String "base_url" "$env:USERPROFILE\.codex\config.toml"
+
+  # 一行修复 base_url（粘贴到 PowerShell 执行）
+  $c = Get-Content "$env:USERPROFILE\.codex\config.toml" -Raw
+  $c = $c -replace '(base_url\s*=\s*")[^"]+(")', '$1http://127.0.0.1:57322/v1$2'
+  $c | Out-File "$env:USERPROFILE\.codex\config.toml" -Encoding utf8 -NoNewline
+  Write-Host "已修复 base_url，重启 Codex 生效"
+  ```
+- **跨机器参考**（公司机使用 switch-*.ps1 脚本）：
+  - 公司机优先运行 `.\switch-deepseek.ps1` 切回 DeepSeek 直连
+  - 家里没有 switch 脚本 → 用上面的 base_url 修复命令替代
+  - 网络稳定后如果想切回省流模式 → 确认 GLM 代理正常运行即可（铁律17 自动分流）
 ## scrapling-crawler Skill
 - **位置**: `~/.codex/skills/scrapling-crawler/`
 - **主脚本**: `scripts/scrapling_fetch.js`
