@@ -279,3 +279,30 @@ ffmpeg -i video.mp4 -i audio.m4a -c:v copy -c:a aac -map 0:v:0 -map 1:a:0 -short
 - **venv 路径**: `~/.codex/skills/scrapling-crawler/.venv/`
 - **ffmpeg 路径**: Codex 内置 (`C:\Users\18384\AppData\Local\Temp\ffmpeg-work-898309298\node_modules\@ffmpeg-installer\win32-x64\ffmpeg.exe`)
 
+
+## 铁律31: 语音精剪经验总结 (2026-07-15 更新)
+- **核心原则：物理切割 > 滤波器/门控**
+  - `noisereduce`（Python）会吞字（"的"被吃掉），禁止使用
+  - `agate` 门控会残留底噪（类似电流声），禁止使用  
+  - `highpass`/`lowpass` 滤波会引入处理伪影，禁止使用
+  - 唯一正确方法：`silencedetect` 检测 → `atrim` 物理切除
+- **切割流程**：
+  1. Whisper 转写原始音频，与 Excel 脚本逐镜对照
+  2. 以脚本镜号为基准定义 keep segments（大段 = 隐藏 stutter）
+  3. 多段合并前必须确认衔接处没有卡壳/重复
+  4. 镜头切换处留 0.05-0.08s 间隔（`aevalsrc=0` 插入静音）
+  5. 拼接后用 `silencedetect=noise=-30dB:d=0.04` 检测气口
+  6. 物理切除气口（体积 = 0，非衰减），切除点加 0.002s 缓冲防爆音
+  7. 编码 AAC 192k，不重采样（保持 44100Hz）
+- **阈值参考**：
+  - -26dB：激进（容易切到字头），仅用于背景很干净的录音
+  - -28dB：适中（默认推荐），大部分录音适用
+  - -30dB：保守（只抓深呼吸），用于音量不稳定的录音
+- **时长预期**：
+  - 原始 169s → 机械粗剪 ~150s → 精剪 ~141s → 手动精修 ~133s
+  - 自动工具可达 90%，最后 10% 需要手动调整
+- **避坑**：
+  - 不要用 `volume=enable` 静音气口（产生硬切爆音）
+  - 不要一次性合并大段（>15s），内部 stutter 会被隐藏
+  - 气口检测的 `d`（最小持续时间）设 0.04 避免切到词内微顿
+  - 转写用 Whisper tiny 只是参考，实际切割点需用频谱/波形验证
