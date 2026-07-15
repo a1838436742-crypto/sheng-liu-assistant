@@ -306,3 +306,24 @@ ffmpeg -i video.mp4 -i audio.m4a -c:v copy -c:a aac -map 0:v:0 -map 1:a:0 -short
   - 不要一次性合并大段（>15s），内部 stutter 会被隐藏
   - 气口检测的 `d`（最小持续时间）设 0.04 避免切到词内微顿
   - 转写用 Whisper tiny 只是参考，实际切割点需用频谱/波形验证
+
+## 铁律32: GitHub 仓库配置与多机同步 (2026-07-15 新增)
+- **仓库地址**：
+  - SSH: `git@github.com:a1838436742-crypto/sheng-liu-assistant.git`
+  - HTTPS: `https://github.com/a1838436742-crypto/sheng-liu-assistant.git`
+- **本地路径**：`C:\Users\DEWK\Documents\省流助手v3.0`
+- **角色分支策略**（基于 `machine.json` 中的 `role`）：
+  - `"role": "company"` → 操作 `company` 分支
+  - `"role": "home"` → 操作 `home` 分支
+  - `"role": "family"` → 操作 `family` 分支
+- **日常同步流程**：
+  - 修改文件后：`git add → git commit → git push origin <当前分支>`
+  - 同步对方更新：`git pull origin <当前分支>`
+  - 首次克隆：`git clone git@github.com:a1838436742-crypto/sheng-liu-assistant.git`
+- **常见问题**：
+  - "没有找到已有的 Git 仓库" → 前往 `C:\Users\DEWK\Documents\省流助手v3.0` 目录操作
+  - HTTPS 在公司网络被墙 → 改用 SSH（已在公司机配置好密钥）
+  - 家里网络 SSH 不通 → 改用 HTTPS 或 `gh` CLI 认证
+- **跨分支合并**：
+  - 需要同步另一台机器的修改时：`git pull origin <对方分支>`
+  - 或者直接在 GitHub 上开 PR 合并
