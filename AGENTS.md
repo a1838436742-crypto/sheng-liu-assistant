@@ -332,15 +332,16 @@ ffmpeg -i video.mp4 -i audio.m4a -c:v copy -c:a aac -map 0:v:0 -map 1:a:0 -short
 - **症状**: `stream disconnected before completion: error sending request for url (http://127.0.0.1:57322/v1/responses)`
 - **原因**: GLM 代理/图片过滤代理到上游 API 的连接不稳定或崩溃
 - **应急方案**:
-  - 优先运行 `.\switch-deepseek.ps1`（切回 DeepSeek 直连，重启 Codex 生效）
-  - 如果脚本缺失：手动改 `%USERPROFILE%\.codex\config.toml` 中 `base_url` 为 `http://127.0.0.1:57322/v1`
-  - 家里没有脚本 → `git pull origin home` 从仓库拉取
-- **恢复后**: 网络稳定后运行 `.\switch-glm.ps1` 切回省流模式
-- **快捷创建脚本**（如果连 git pull 都跑不了）：
-  ```powershell
-  # 一行命令切回 DeepSeek：
-  $c = Get-Content "$env:USERPROFILE\.codex\config.toml" -Raw
-  $c = $c -replace '''(base_url\s*=\s*")[^"]+(")''', '''${1}http://127.0.0.1:57322/v1${2}'''
-  $c | Set-Content "$env:USERPROFILE\.codex\config.toml" -Encoding UTF8 -NoNewline
-  Write-Host "已切换，重启 Codex 生效"
-  ```
+  - 优先运行 `.\switch-direct.ps1`（切直连 57324，重启 Codex 生效）
+  - 备选: `.\switch-deepseek.ps1`（走旧链 57322）
+## 铁律34: deepseek-direct 直连方案 (2026-07-16 新增)
+- **端口**: 57324
+- **文件**: `deepseek-direct-server.js`（HTTP 代理服务器，供 config.toml 指向）
+- **文件**: `deepseek-direct.js`（JS kernel 模块，供 token-saver 调 DeepSeek API）
+- **优势**: 绕过 codex++ 断连问题，内嵌图片过滤
+- **切换**:
+  - 切直连: `.\switch-direct.ps1` → config.toml 指向 57324
+  - 切回旧链: `.\switch-deepseek.ps1` → config.toml 指向 57322
+- **config.toml 建议值**: `base_url = "http://127.0.0.1:57324/v1"`
+- **新增文件**: `deepseek-direct-server.js`, `switch-direct.ps1`
+
