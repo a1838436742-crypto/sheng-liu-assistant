@@ -42,6 +42,25 @@ function flatten(input, inst) {
   return msgs;
 }
 
+// ── 判断任务复杂度：简单→GLM(57330), 复杂→DeepSeek ──
+function isSimple(parsed, msgs) {
+  if (parsed.tools && Array.isArray(parsed.tools) && parsed.tools.length > 0) return false;
+  var total = 0;
+  msgs.forEach(function(m){if(typeof m.content==="string")total+=m.content.length});
+  return total <= 3000;
+}
+
+// ── 转发到 GLM 代理 ──
+function proxyToGLM(raw, stream, cRes) {
+  return new Promise(function(ok) {
+    var buf=Buffer.from(raw);
+    var r=require("http").request({hostname:"127.0.0.1",port:57330,path:"/v1/responses",method:"POST",headers:{"Content-Type":"application/json","Content-Length":buf.length,"Connection":"keep-alive"},timeout:180000},
+      function(s){if(stream){cRes.writeHead(s.statusCode,s.headers);s.pipe(cRes);s.on("end",ok)}else{var d="";s.on("data",function(c){d+=c});s.on("end",function(){ok({status:s.statusCode,body:d})})}});
+    r.on("error",function(e){ok({error:e.message})});
+    r.write(buf);r.end();
+  });
+}
+
 function callDS(mgs, opts) {
   return new Promise(function(ok) {
     var body=JSON.stringify({model:opts.model||"deepseek-chat",messages:mgs,max_tokens:opts.max_tokens||4096,temperature:opts.temperature??0.7,stream:false});
@@ -63,15 +82,33 @@ var server=http.createServer(function(req,res){
       if(req.method==="GET"&&url.includes("/models")){res.writeHead(200,{"Content-Type":"application/json"});res.end(JSON.stringify({object:"list",data:[{id:"deepseek-chat",object:"model"}]}));return}
       if(url.includes("/responses")){
         var p=JSON.parse(raw), stream=p.stream===true||p.stream==="true", model=p.model||"deepseek-chat";
+        var msgs=flatten(p.input,p.instructions||"");
+        var rid="resp_"+Date.now();
+
+        // 智能路由：简单→GLM免费，复杂→DeepSeek付费
+        if (isSimple(p, msgs)) {
+          log("简单→GLM(免费)");
+          if (stream) { proxyToGLM(raw, true, res); return }
+          var result=await proxyToGLM(raw, false, res);
+          if(result.error){res.writeHead(502);res.end(JSON.stringify({error:{message:result.error}}));return}
+          res.writeHead(result.status,{"Content-Type":"application/json"});
+          res.end(result.body);
+          return;
+        }
+
+        log("复杂→DeepSeek(付费)");
         if(raw.includes("image_url")||raw.includes("input_image")){p=stripImages(p);log("过滤了图片");}
-        var msgs=flatten(p.input,p.instructions||""), rid="resp_"+Date.now();
+        var msgs2=flatten(p.input,p.instructions||"");
+        var p=JSON.parse(raw), stream=p.stream===true||p.stream==="true", model=p.model||"deepseek-chat";
+        if(raw.includes("image_url")||raw.includes("input_image")){p=stripImages(p);log("过滤了图片");}
+        
         log(model+" "+(stream?"流式":"非流式")+", "+msgs.length+"条消息");
         if(stream){
           res.writeHead(200,{"Content-Type":"text/event-stream","Cache-Control":"no-cache","Connection":"keep-alive"});
           res.write("event: response.created\ndata: "+JSON.stringify({type:"response.created",response:{id:rid,object:"response",model:model,status:"in_progress"}})+"\n\n");
           var fc="",usage={}, buf=Buffer.from(JSON.stringify({model:"deepseek-chat",messages:msgs,max_tokens:p.max_output_tokens||4096,temperature:p.temperature??0.7,stream:true}));
           var r=https.request({hostname:HOST,path:"/chat/completions",method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+KEY,"Content-Length":buf.length},timeout:180000},
-            function(sr){var b="";sr.on("data",function(c){b+=c.toString();var ls=b.split("\n");b=ls.pop()||"";ls.forEach(function(l){l=l.trim();if(!l||!l.startsWith("data: "))return;if(l.slice(6)==="[DONE]")return;try{var j=JSON.parse(l.slice(6)),d=j.choices?.[0]?.delta?.content||"";if(d){fc+=d;res.write("event: response.output_text.delta\ndata: "+JSON.stringify({type:"response.output_text.delta",delta:d,index:0})+"\n\n")}if(j.usage)usage=j.usage}catch(e){}})});sr.on("end",function(){var u=usage||{};res.write("event: response.completed\ndata: "+JSON.stringify({type:"response.completed",response:{id:rid,object:"response",model:model,status:"completed",output:[{type:"message",role:"assistant",content:[{type:"output_text",text:fc}]}],usage:{input_tokens:u.prompt_tokens||0,output_tokens:u.completion_tokens||0}}})+"\n\n");res.end()})});
+            function(sr){var b="";sr.on("data",function(c){b+=c.toString();var ls=b.split("\n");b=ls.pop()||"";ls.forEach(function(l){l=l.trim();if(!l||!l.startsWith("data: "))return;if(l.slice(6)==="[DONE]")return;try{var j=JSON.parse(l.slice(6)),d=j.choices?.[0]?.delta?.content||"";if(d){fc+=d;res.write("event: response.output_text.delta\ndata: "+JSON.stringify({type:"response.output_text.delta",delta:d,index:0})+"\n\n")}if(j.usage)usage=j.usage}catch(e){}})});sr.on("end",function(){var u=usage||{};res.write("event: response.completed\ndata: "+JSON.stringify({type:"response.completed",response:{id:rid,object:"response",model:model,status:"completed",output:[{type:"message",role:"assistant",content:[{type:"output_text",text:fc}]}],usage:{input_tokens:u.prompt_tokens||0,output_tokens:u.completion_tokens||0,total_tokens:(u.prompt_tokens||0)+(u.completion_tokens||0)}}})+"\n\n");res.end()})});
           r.on("error",function(e){res.write("event: error\ndata: "+JSON.stringify({type:"error",error:{message:e.message}})+"\n\n");res.end()});
           r.write(buf);r.end();
         } else {
@@ -79,7 +116,7 @@ var server=http.createServer(function(req,res){
           if(result.error){res.writeHead(502,{"Content-Type":"application/json"});res.end(JSON.stringify({error:{message:result.error}}));return}
           var c=result.choices?.[0]?.message?.content||"",u=result.usage||{};
           res.writeHead(200,{"Content-Type":"application/json"});
-          res.end(JSON.stringify({id:rid,object:"response",model:model,status:"completed",output:[{type:"message",role:"assistant",content:[{type:"output_text",text:c}]}],usage:{input_tokens:u.prompt_tokens||0,output_tokens:u.completion_tokens||0}}));
+          res.end(JSON.stringify({id:rid,object:"response",model:model,status:"completed",output:[{type:"message",role:"assistant",content:[{type:"output_text",text:c}]}],usage:{input_tokens:u.prompt_tokens||0,output_tokens:u.completion_tokens||0,total_tokens:(u.prompt_tokens||0)+(u.completion_tokens||0)}}));
         } return;
       }
       log("404: "+url);res.writeHead(404);res.end("not found");
@@ -88,3 +125,6 @@ var server=http.createServer(function(req,res){
 });
 server.timeout=0;
 server.listen(PORT,function(){log("deepseek-direct-server 就绪: 127.0.0.1:"+PORT+" (内嵌图片过滤)");});
+
+
+

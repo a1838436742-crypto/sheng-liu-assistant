@@ -86,7 +86,7 @@ var server = http.createServer(function(cReq, cRes) {
         port: UPSTREAM_PORT,
         path: url,
         method: method,
-        headers: Object.assign({}, cReq.headers, {
+        headers: Object.assign({}, Object.fromEntries(Object.entries(cReq.headers).filter(function(e){return e[0]!=='transfer-encoding'&&e[0]!=='TE'})), {
           "Content-Length": Buffer.byteLength(cleanedBody)
         }),
         timeout: 180000,
@@ -119,3 +119,4 @@ server.timeout = 0;
 server.listen(LISTEN_PORT, function() {
   log("图片过滤器已就绪: 127.0.0.1:" + LISTEN_PORT + " → codex-plus-plus:" + UPSTREAM_PORT);
 });
+
