@@ -365,3 +365,28 @@ ffmpeg -i video.mp4 -i audio.m4a -c:v copy -c:a aac -map 0:v:0 -map 1:a:0 -short
   - `FixPlugins.lnk` → `fix-plugins-on-startup.ps1`（修复插件列表，同时启动 57324）
 - **冲突说明**: 57321 和 57324 同时运行时不冲突，但 `config.toml` 只能指向一个
 - **provider-sync**: codex++ 的自动同步会覆盖 `config.toml`，备份在 `.codex\\backups\\codex-plus-live-*`
+﻿## 铁律35: AE 插件二进制翻译（2026-07-17 沉淀）
+### 核心流程
+1. **提取真实参数** → 通过 AE JSX 脚本或 `.aep` 项目文件获取运行时参数名
+2. **建字典** → `merged_en2cn.py`，用 GLM-4-Flash 免费 API 批量翻译缺失项
+3. **扫描二进制** → 取 `.aex` 文件中间 50% 区域，找大写字母开头的 ASCII 字符串
+4. **替换规则**：
+   - 参数名 → GBK 编码（中文 2 字节），带 `00_UTF8_Fixer.aex` 运行时转 UTF-8
+   - 效果菜单名（MIB8 字段）→ 保持英文（翻译会导致重复提示）
+   - 文件名 → 保持原名（改文件名会导致 AE 认不出插件）
+5. **空字节过滤** → `nulls >= 1`（大于 0），`nulls = 0` 的是长字符串的子串，跳过
+6. **长度计算** → `avail = first_null - start`，翻译后 GBK 字节数必须 ≤ avail
+7. **备份 → 部署 → 验证** → MD5 校验确保替换成功
+### 关键坑
+- **AE 必须完全关闭** → `taskkill /F /IM AfterFX.exe`（需管理员），否则文件被锁
+- **管理员权限** → 插件在 `C:\Program Files\Adobe\Common\Plug-ins\7.0\MediaCore\`，需提权 shell
+- **重复插件检测** → 同一效果不能出现在两个位置（C 盘和 D 盘都有会导致启动报警）
+- **文件大小必须不变** → 只替换字符串内容，不增减字节
+- **词典覆盖** → 不能只扫二进制字符串，AE 实际显示的参数可能以其他格式存储
+- **GBK 编码显示** → 终端查看 GBK 中文为乱码，需 Python `decode('gbk')` 验证
+### 工具链
+- `_translate_v7.py` — 主翻译脚本（nulls>=1）
+- `merged_en2cn.py` — 字典文件
+- `_check_missing_from_ae.py` — 对比字典与 AE 运行时参数
+- GLM-4-Flash 免费 API — batch 翻译缺失参数（铁律17 模板）
+- `00_UTF8_Fixer.aex` — 运行时 GBK→UTF-8 转码器
