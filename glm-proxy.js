@@ -32,7 +32,7 @@ var MODEL_MAP = {
   "gpt-5.6-terra": "glm-4.5-air",
   "gpt-5.6-luna": "glm-4-flash",
   "gpt-5.4": "glm-4.5-air",
-  "deepseek-v4-flash": "glm-4.5-air",
+  "deepseek-v4-flash": "glm-4-flash",
   "deepseek-chat": "glm-4.5-air",
   "glm-4-flash": "glm-4-flash",
   "glm-4.5-air": "glm-4.5-air",

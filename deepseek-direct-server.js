@@ -2,6 +2,7 @@
 // node deepseek-direct-server.js → 监听 57324 → api.deepseek.com
 var http = require("http");
 var https = require("https");
+var http = require("http");
 var fs = require("fs");
 var path = require("path");
 
@@ -82,6 +83,7 @@ var server=http.createServer(function(req,res){
       if(req.method==="GET"&&url.includes("/models")){res.writeHead(200,{"Content-Type":"application/json"});res.end(JSON.stringify({object:"list",data:[{id:"deepseek-chat",object:"model"}]}));return}
       if(url.includes("/responses")){
         var p=JSON.parse(raw), stream=p.stream===true||p.stream==="true", model=p.model||"deepseek-chat";
+        if(raw.includes("image_url")||raw.includes("input_image")){p=stripImages(p);raw=JSON.stringify(p);log("过滤了图片");}
         var msgs=flatten(p.input,p.instructions||"");
         var rid="resp_"+Date.now();
 
@@ -97,11 +99,6 @@ var server=http.createServer(function(req,res){
         }
 
         log("复杂→DeepSeek(付费)");
-        if(raw.includes("image_url")||raw.includes("input_image")){p=stripImages(p);log("过滤了图片");}
-        var msgs2=flatten(p.input,p.instructions||"");
-        var p=JSON.parse(raw), stream=p.stream===true||p.stream==="true", model=p.model||"deepseek-chat";
-        if(raw.includes("image_url")||raw.includes("input_image")){p=stripImages(p);log("过滤了图片");}
-        
         log(model+" "+(stream?"流式":"非流式")+", "+msgs.length+"条消息");
         if(stream){
           res.writeHead(200,{"Content-Type":"text/event-stream","Cache-Control":"no-cache","Connection":"keep-alive"});
