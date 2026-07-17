@@ -82,7 +82,7 @@ var server=http.createServer(function(req,res){
       if(req.method==="OPTIONS"){res.writeHead(204,{"Access-Control-Allow-Origin":"*","Access-Control-Allow-Methods":"GET,POST,OPTIONS","Access-Control-Allow-Headers":"*"});res.end();return}
       if(req.method==="GET"&&url.includes("/models")){res.writeHead(200,{"Content-Type":"application/json"});res.end(JSON.stringify({object:"list",data:[{id:"deepseek-chat",object:"model"}]}));return}
       if(url.includes("/responses")){
-        var p=JSON.parse(raw), stream=p.stream===true||p.stream==="true", model=p.model||"deepseek-chat";
+        var p=JSON.parse(raw.replace(/^\uFEFF/,"")), stream=p.stream===true||p.stream==="true", model=p.model||"deepseek-chat";
         if(raw.includes("image_url")||raw.includes("input_image")){p=stripImages(p);raw=JSON.stringify(p);log("过滤了图片");}
         var msgs=flatten(p.input,p.instructions||"");
         var rid="resp_"+Date.now();
@@ -118,7 +118,7 @@ var server=http.createServer(function(req,res){
         } return;
       }
       log("404: "+url);res.writeHead(404);res.end("not found");
-    }catch(e){log("错误: "+e.message);try{res.writeHead(500,{"Content-Type":"application/json"});res.end(JSON.stringify({error:{message:e.message}}))}catch(e2){}}
+    }catch(e){var preview=raw?raw.substring(0,80).replace(/[\x00-\x1f]/g,"?"):"(empty)";log("JSON解析失败: "+e.message+" 原始:"+preview);try{res.writeHead(500,{"Content-Type":"application/json"});res.end(JSON.stringify({error:{message:e.message}}))}catch(e2){}}
   });
 });
 server.timeout=0;
