@@ -1,15 +1,18 @@
-ï»¿// image-filter-proxy.js v1.0
-// æ‹¦æˆª image_url é˜²æ­¢æ±¡æŸ“ä¼šè¯æ–‡ä»¶
-// Codex â†’ æœ¬ä»£ç†(57322) â†’ codex-plus-plus(57321)
+// image-filter-proxy.js v2.0
+// À¹½ØÍ¼Æ¬ ¡ú ±£´æµ½ÎÄ¼ş ¡ú Ìæ»»Îª´øÂ·¾¶µÄÌáÊ¾ÎÄ×Ö
+// Codex ¡ú ±¾´úÀí(57322) ¡ú codex-plus-plus(57321)
 var http = require("http");
 var fs = require("fs");
 var path = require("path");
+var crypto = require("crypto");
 
 var UPSTREAM_PORT = 57321;
 var UPSTREAM_HOST = "127.0.0.1";
 var LISTEN_PORT = 57322;
 var logDir = path.join(__dirname, ".cache");
+var imgDir = path.join(logDir, "intercepted_images");
 if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+if (!fs.existsSync(imgDir)) fs.mkdirSync(imgDir, { recursive: true });
 var logPath = path.join(logDir, "image-filter.log");
 function log(msg) {
   var ts = new Date().toISOString();
@@ -18,28 +21,79 @@ function log(msg) {
   try { fs.appendFileSync(logPath, line + "\n", "utf-8"); } catch(e) {}
 }
 
-// é€’å½’åˆ é™¤æ‰€æœ‰ image_url / input_image å­—æ®µ
-function stripImages(obj) {
+function extFromMime(mime) {
+  var map = {"image/png":"png","image/jpeg":"jpg","image/jpg":"jpg","image/gif":"gif","image/webp":"webp","image/bmp":"bmp"};
+  return map[mime] || "png";
+}
+
+function saveBase64Image(dataUri) {
+  try {
+    var m = dataUri.match(/^data:([^;]+);base64,(.+)$/);
+    if (!m) return null;
+    var mime = m[1], b64 = m[2], ext = extFromMime(mime);
+    var hash = crypto.createHash("md5").update(b64.substring(0, 1000)).digest("hex").substring(0, 8);
+    var ts = Date.now().toString(36);
+    var filename = "img_" + ts + "_" + hash + "." + ext;
+    var filepath = path.join(imgDir, filename);
+    try { fs.statSync(filepath); return filepath; } catch(e) {}
+    var buf = Buffer.from(b64, "base64");
+    fs.writeFileSync(filepath, buf);
+    log("±£´æÍ¼Æ¬ -> " + filename + " (" + buf.length + " bytes)");
+    return filepath;
+  } catch(e) {
+    log("±£´æÍ¼Æ¬Ê§°Ü: " + e.message);
+    return null;
+  }
+}
+
+// ÔÚ strip Ö®Ç°´ÓÔ­Ê¼¶ÔÏóÌáÈ¡ËùÓĞÍ¼Æ¬²¢±£´æ£¨È¥ÖØ£©
+function saveAllImages(obj) {
+  var seen = new Set();
+  var paths = [];
+  function walk(v) {
+    if (!v || typeof v !== "object") return;
+    if (Array.isArray(v)) { v.forEach(walk); return; }
+    if (v.type === "input_image" && v.image_url) {
+      var fp = saveBase64Image(v.image_url);
+      if (fp && !seen.has(fp)) { seen.add(fp); paths.push(fp); }
+    }
+    for (var key in v) { if (key !== "image_url") walk(v[key]); }
+  }
+  walk(obj);
+  return paths;
+}
+
+function stripImages(obj, savedPaths) {
   if (!obj || typeof obj !== "object") return obj;
-  if (Array.isArray(obj)) return obj.map(stripImages);
+  if (Array.isArray(obj)) return obj.map(function(v) { return stripImages(v, savedPaths); });
   var clean = {};
   for (var key in obj) {
-    // è·³è¿‡ image_url å’Œ input_image
     if (key === "image_url") continue;
     if (key === "input_image") continue;
-    // å¤„ç† type å­—æ®µ
     if (key === "type" && (obj[key] === "input_image" || obj[key] === "image_url")) continue;
-    clean[key] = stripImages(obj[key]);
+    clean[key] = stripImages(obj[key], savedPaths);
   }
-  // å¦‚æœæ˜¯ content æ•°ç»„ï¼Œè¿‡æ»¤æ‰å›¾ç‰‡ç±»å‹çš„ part
   if (Array.isArray(clean.content)) {
-    clean.content = clean.content.filter(function(part) {
+    var hasImage = false, newContent = [];
+    for (var i = 0; i < clean.content.length; i++) {
+      var part = clean.content[i];
       if (typeof part === "object" && part !== null) {
-        if (part.type === "input_image") return false;
-        if (part.type === "image_url") return false;
+        if (part.type === "input_image" || part.type === "image_url") { hasImage = true; continue; }
+        else { newContent.push(part); }
+      } else { newContent.push(part); }
+    }
+    if (hasImage) {
+      var hint = "\n\n[´ËÏûÏ¢°üº¬Í¼Æ¬£¬ÒÑ±» 57322 À¹½Ø±£´æ]";
+      if (savedPaths && savedPaths.length > 0) hint += "\n±¾µØÂ·¾¶: " + savedPaths.join(", ");
+      hint += "\nÈçĞè·ÖÎöÍ¼Æ¬ÄÚÈİ£¬ÇëÓÃ GLM-4.6V£¨vision£©»ò Python PIL ±¾µØ´¦Àí";
+      var lastText = newContent.length > 0 ? newContent[newContent.length - 1] : null;
+      if (lastText && lastText.type === "input_text" && typeof lastText.text === "string") {
+        lastText.text += hint;
+      } else {
+        newContent.push({type: "input_text", text: hint.trim()});
       }
-      return true;
-    });
+    }
+    clean.content = newContent;
   }
   return clean;
 }
@@ -50,73 +104,40 @@ var server = http.createServer(function(cReq, cRes) {
   cReq.on("end", async function() {
     try {
       var rawBody = Buffer.concat(chunks).toString("utf-8");
-      var url = cReq.url;
-      var method = cReq.method;
-
+      var url = cReq.url, method = cReq.method;
       if (method === "OPTIONS") {
-        cRes.writeHead(204, {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
-          "Access-Control-Allow-Headers": "*"
-        });
-        cRes.end();
-        return;
+        cRes.writeHead(204, { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET,POST,OPTIONS", "Access-Control-Allow-Headers": "*" });
+        cRes.end(); return;
       }
-
-      // è§£æå¹¶æ¸…æ´—è¯·æ±‚ä½“
       var cleanedBody = rawBody;
       try {
         var parsed = JSON.parse(rawBody);
         if (parsed) {
           var original = JSON.stringify(parsed).length;
-          var cleaned = stripImages(parsed);
+          var savedPaths = saveAllImages(parsed);
+          var cleaned = stripImages(parsed, savedPaths);
           cleanedBody = JSON.stringify(cleaned);
           var stripped = original - cleanedBody.length;
-          if (stripped > 0) {
-            log("æ‹¦æˆªå¹¶ç§»é™¤ " + stripped + " bytes çš„å›¾ç‰‡æ•°æ®");
-          }
+          if (stripped > 0) log("À¹½Ø²¢ÒÆ³ı " + stripped + " bytes µÄÍ¼Æ¬Êı¾İ");
         }
-      } catch(e) {
-        // ä¸æ˜¯ JSONï¼Œé€ä¼ 
-      }
-
-      // è½¬å‘åˆ° codex-plus-plus
+      } catch(e) {}
       var opts = {
-        hostname: UPSTREAM_HOST,
-        port: UPSTREAM_PORT,
-        path: url,
-        method: method,
-        headers: Object.assign({}, Object.fromEntries(Object.entries(cReq.headers).filter(function(e){return e[0]!=='transfer-encoding'&&e[0]!=='TE'})), {
-          "Content-Length": Buffer.byteLength(cleanedBody)
-        }),
+        hostname: UPSTREAM_HOST, port: UPSTREAM_PORT, path: url, method: method,
+        headers: Object.assign({}, Object.fromEntries(Object.entries(cReq.headers).filter(function(e){return e[0]!=='transfer-encoding'&&e[0]!=='TE'})), { "Content-Length": Buffer.byteLength(cleanedBody) }),
         timeout: 180000,
       };
-
-      var upstreamReq = http.request(opts, function(upRes) {
-        cRes.writeHead(upRes.statusCode, upRes.headers);
-        upRes.pipe(cRes);
-      });
-      upstreamReq.on("error", function(e) {
-        log("è½¬å‘é”™è¯¯: " + e.message);
-        cRes.writeHead(502);
-        cRes.end(JSON.stringify({error: "proxy error: " + e.message}));
-      });
-      upstreamReq.on("timeout", function() {
-        upstreamReq.destroy();
-        cRes.writeHead(504);
-        cRes.end(JSON.stringify({error: "upstream timeout"}));
-      });
-      upstreamReq.write(cleanedBody);
-      upstreamReq.end();
+      var upstreamReq = http.request(opts, function(upRes) { cRes.writeHead(upRes.statusCode, upRes.headers); upRes.pipe(cRes); });
+      upstreamReq.on("error", function(e) { log("×ª·¢´íÎó: " + e.message); cRes.writeHead(502); cRes.end(JSON.stringify({error: "proxy error: " + e.message})); });
+      upstreamReq.on("timeout", function() { upstreamReq.destroy(); cRes.writeHead(504); cRes.end(JSON.stringify({error: "upstream timeout"})); });
+      upstreamReq.write(cleanedBody); upstreamReq.end();
     } catch(e) {
-      log("é”™è¯¯: " + e.message);
+      log("´íÎó: " + e.message);
       try { cRes.writeHead(500); cRes.end(JSON.stringify({error:e.message})); } catch(e2) {}
     }
   });
 });
-
 server.timeout = 0;
 server.listen(LISTEN_PORT, function() {
-  log("å›¾ç‰‡è¿‡æ»¤å™¨å·²å°±ç»ª: 127.0.0.1:" + LISTEN_PORT + " â†’ codex-plus-plus:" + UPSTREAM_PORT);
+  log("Í¼Æ¬¹ıÂËÆ÷ v2.0 ÒÑ¾ÍĞ÷: 127.0.0.1:" + LISTEN_PORT + " -> codex-plus-plus:" + UPSTREAM_PORT);
+  log("À¹½ØµÄÍ¼Æ¬½«±£´æµ½: " + imgDir);
 });
-

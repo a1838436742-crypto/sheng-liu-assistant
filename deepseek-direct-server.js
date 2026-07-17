@@ -22,8 +22,27 @@ function stripImages(o) {
   if (!o||typeof o!=="object") return o;
   if (Array.isArray(o)) return o.map(stripImages);
   var c={}; for(var k in o){if(k==="image_url"||k==="input_image"||(k==="type"&&(o[k]==="input_image"||o[k]==="image_url")))continue; c[k]=stripImages(o[k]);}
-  if (Array.isArray(c.content)) c.content=c.content.filter(function(p){return typeof p!=="object"||(p.type!=="input_image"&&p.type!=="image_url")});
+  if (Array.isArray(c.content)) c.content=c.content.filter(function(p){return typeof p!=="object"||((p.type!=="input_image"&&p.type!=="image_url")&&Object.keys(p).length>0)});
   return c;
+}
+
+
+// Responses API tools → DeepSeek Chat Completions tools 格式转换
+function normalizeTools(tools) {
+  if (!Array.isArray(tools)) return tools;
+  return tools.map(function(t) {
+    if (!t || typeof t !== "object") return t;
+    // Responses API 格式: {type:"function", name:"xxx", parameters:{}, description:"..."}
+    // DeepSeek 格式: {type:"function", function:{name:"xxx", parameters:{}, description:"..."}}
+    if (t.type === "function" && !t.function && t.name) {
+      var fn = {name: t.name};
+      if (t.description) fn.description = t.description;
+      if (t.parameters) fn.parameters = t.parameters;
+      if (t.strict) fn.strict = t.strict;
+      return {type: "function", function: fn};
+    }
+    return t;
+  });
 }
 
 function flatten(input, inst) {
@@ -33,7 +52,7 @@ function flatten(input, inst) {
   if (typeof input==="string") { msgs.push({role:"user",content:input}); return msgs; }
   if (Array.isArray(input)) input.forEach(function(it){
     if (!it) return;
-    var role=it.role||"user", content=it.content;
+    var role=it.role;if(role==="developer")role="system";if(!role)role="user";var content=it.content;
     if (Array.isArray(content)) {
       var txt=content.map(function(p){if(typeof p==="string")return p; if(p.type==="input_text"||p.type==="text")return p.text||""; if(p.type==="input_image"||p.type==="image_url")return "[图片已过滤]"; return JSON.stringify(p)}).filter(Boolean);
       msgs.push({role:role,content:txt.join("\n")});
@@ -63,7 +82,7 @@ function proxyToGLM(raw, stream, cRes) {
 
 function callDS(mgs, opts) {
   return new Promise(function(ok) {
-    var body=JSON.stringify({model:opts.model||"deepseek-chat",messages:mgs,max_tokens:opts.max_tokens||4096,temperature:opts.temperature??0.7,stream:false});
+    var dsBody2={model:opts.model||"deepseek-chat",messages:mgs,max_tokens:opts.max_tokens||4096,temperature:opts.temperature??0.7,stream:false};if(opts._tools)dsBody2.tools=normalizeTools(opts._tools);if(opts._tool_choice)dsBody2.tool_choice=opts._tool_choice;var body=JSON.stringify(dsBody2);
     var buf=Buffer.from(body);
     var r=https.request({hostname:HOST,path:"/chat/completions",method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+KEY,"Content-Length":buf.length},timeout:180000},
       function(res){var d="";res.on("data",function(c){d+=c});res.on("end",function(){try{var j=JSON.parse(d);if(j.error)ok({error:j.error.message});else ok(j)}catch(e){ok({error:"parse:"+e.message})}})});
@@ -103,14 +122,14 @@ var server=http.createServer(function(req,res){
         if(stream){
           res.writeHead(200,{"Content-Type":"text/event-stream","Cache-Control":"no-cache","Connection":"keep-alive"});
           res.write("event: response.created\ndata: "+JSON.stringify({type:"response.created",response:{id:rid,object:"response",model:model,status:"in_progress"}})+"\n\n");
-          var fc="",usage={}, buf=Buffer.from(JSON.stringify({model:"deepseek-chat",messages:msgs,max_tokens:p.max_output_tokens||4096,temperature:p.temperature??0.7,stream:true}));
-          var r=https.request({hostname:HOST,path:"/chat/completions",method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+KEY,"Content-Length":buf.length},timeout:300000},
-            function(sr){var b="";sr.on("data",function(c){b+=c.toString();var ls=b.split("\n");b=ls.pop()||"";ls.forEach(function(l){l=l.trim();if(!l||!l.startsWith("data: "))return;if(l.slice(6)==="[DONE]")return;try{var j=JSON.parse(l.slice(6)),d=j.choices?.[0]?.delta?.content||"";if(d){fc+=d;res.write("event: response.output_text.delta\ndata: "+JSON.stringify({type:"response.output_text.delta",delta:d,index:0})+"\n\n")}if(j.usage)usage=j.usage}catch(e){}})});sr.on("end",function(){var u=usage||{};res.write("event: response.completed\ndata: "+JSON.stringify({type:"response.completed",response:{id:rid,object:"response",model:model,status:"completed",output:[{type:"message",role:"assistant",content:[{type:"output_text",text:fc}]}],usage:{input_tokens:u.prompt_tokens||0,output_tokens:u.completion_tokens||0,total_tokens:(u.prompt_tokens||0)+(u.completion_tokens||0)}}})+"\n\n");res.end()})});
-          r.on("error",function(e){try{res.write("event: error\ndata: "+JSON.stringify({type:"error",error:{message:e.message}})+"\n\n");res.end()}catch(e2){}});
-          r.on("timeout",function(){r.destroy();try{res.write("event: error\ndata: "+JSON.stringify({type:"error",error:{message:"DeepSeek\u6d41\u5f0f\u8d85\u65f6"}})+"\n\n");res.end()}catch(e){}});
+          var fc="",usage={}, dsBody={model:"deepseek-chat",messages:msgs,max_tokens:p.max_output_tokens||4096,temperature:p.temperature??0.7,stream:true};if(p.tools&&Array.isArray(p.tools)&&p.tools.length)dsBody.tools=normalizeTools(p.tools);if(p.tool_choice)dsBody.tool_choice=p.tool_choice; buf=Buffer.from(JSON.stringify(dsBody));
+          var r=https.request({hostname:HOST,path:"/chat/completions",method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+KEY,"Content-Length":buf.length},},
+            function(sr){log("DS流状态:"+sr.statusCode);if(sr.statusCode!==200){var eb="";sr.on("data",function(c){eb+=c});sr.on("end",function(){try{log("DS错误: "+eb);var rid="resp_"+Date.now();res.write("event: response.output_text.delta\ndata: "+JSON.stringify({type:"response.output_text.delta",delta:"[DeepSeek返回"+sr.statusCode+"]",index:0})+"\n\n");res.write("event: response.completed\ndata: "+JSON.stringify({type:"response.completed",response:{id:rid,object:"response",model:"deepseek-chat",status:"completed",output:[{type:"message",role:"assistant",content:[{type:"output_text",text:"[DeepSeek返回"+sr.statusCode+": "+eb+"]"}]}],usage:{input_tokens:0,output_tokens:0,total_tokens:0}}})+"\n\n");res.end()}catch(e2){}});return}var b="";sr.on("data",function(c){b+=c.toString();var ls=b.split("\n");b=ls.pop()||"";ls.forEach(function(l){l=l.trim();if(!l||!l.startsWith("data: "))return;if(l.slice(6)==="[DONE]")return;try{var j=JSON.parse(l.slice(6)),d=j.choices?.[0]?.delta?.content||"";if(d){fc+=d;res.write("event: response.output_text.delta\ndata: "+JSON.stringify({type:"response.output_text.delta",delta:d,index:0})+"\n\n")}if(j.usage)usage=j.usage}catch(e){}})});sr.on("end",function(){log("DS流式完成 "+fc.length+" chars");var u=usage||{};res.write("event: response.completed\ndata: "+JSON.stringify({type:"response.completed",response:{id:rid,object:"response",model:model,status:"completed",output:[{type:"message",role:"assistant",content:[{type:"output_text",text:fc}]}],usage:{input_tokens:u.prompt_tokens||0,output_tokens:u.completion_tokens||0,total_tokens:(u.prompt_tokens||0)+(u.completion_tokens||0)}}})+"\n\n");res.end()})});
+          r.on("error",function(e){try{log("DS流错误:"+e.message);var rid3="resp_"+Date.now();res.write("event: response.output_text.delta\ndata: "+JSON.stringify({type:"response.output_text.delta",delta:"[连接错误]",index:0})+"\n\n");res.write("event: response.completed\ndata: "+JSON.stringify({type:"response.completed",response:{id:rid3,object:"response",model:"deepseek-chat",status:"completed",output:[{type:"message",role:"assistant",content:[{type:"output_text",text:"[连接错误: "+e.message+"]"}]}],usage:{input_tokens:0,output_tokens:0,total_tokens:0}}})+"\n\n");res.end()}catch(e2){}});
+          r.setTimeout(60000);r.on("timeout",function(){log("DS流式超时");r.destroy();try{var rid2="resp_"+Date.now();res.write("event: response.output_text.delta\ndata: "+JSON.stringify({type:"response.output_text.delta",delta:"[超时]",index:0})+"\n\n");res.write("event: response.completed\ndata: "+JSON.stringify({type:"response.completed",response:{id:rid2,object:"response",model:"deepseek-chat",status:"completed",output:[{type:"message",role:"assistant",content:[{type:"output_text",text:"[超时]"}]}],usage:{input_tokens:0,output_tokens:0,total_tokens:0}}})+"\n\n");res.end()}catch(e){}});
           r.write(buf);r.end();
         } else {
-          var result=await callDS(msgs,{model:model,max_tokens:p.max_output_tokens,temperature:p.temperature});
+          log("DS非流式开始...");var result=await callDS(msgs,{model:model,max_tokens:p.max_output_tokens,temperature:p.temperature,_tools:p.tools,_tool_choice:p.tool_choice});
           if(result.error){res.writeHead(502,{"Content-Type":"application/json"});res.end(JSON.stringify({error:{message:result.error}}));return}
           var c=result.choices?.[0]?.message?.content||"",u=result.usage||{};
           res.writeHead(200,{"Content-Type":"application/json"});
@@ -121,6 +140,17 @@ var server=http.createServer(function(req,res){
     }catch(e){var preview=raw?raw.substring(0,80).replace(/[\x00-\x1f]/g,"?"):"(empty)";log("JSON解析失败: "+e.message+" 原始:"+preview);try{res.writeHead(500,{"Content-Type":"application/json"});res.end(JSON.stringify({error:{message:e.message}}))}catch(e2){}}
   });
 });
+
+
+// ── 全局兜底：防止未捕获异常炸掉整个进程 ──
+process.on("uncaughtException", function(e) {
+  log("未捕获异常: " + (e && e.message));
+  if (e && e.stack) log(e.stack.split("\n").slice(0,3).join(" "));
+});
+process.on("unhandledRejection", function(e) {
+  log("未处理Promise: " + (e && e.message));
+});
+
 server.timeout=0;
 server.listen(PORT,function(){log("deepseek-direct-server 就绪: 127.0.0.1:"+PORT+" (内嵌图片过滤)");});
 

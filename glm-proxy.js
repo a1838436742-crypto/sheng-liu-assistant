@@ -117,7 +117,7 @@ function flattenInput(input, instructions) {
   if (Array.isArray(input)) {
     input.forEach(function(item) {
       if (!item) return;
-      var role = item.role || "user";
+      var role = item.role;if(role==="developer")role="system";if(!role)role="user";
       var content = item.content;
       if (Array.isArray(content)) {
         if (hasImageParts(content)) {
@@ -334,7 +334,7 @@ var server = http.createServer(function(cReq, cRes) {
         var resp = {
           id: respId, object:"response",
           model: originalModel, output: out,
-          usage: {input_tokens: usage.prompt_tokens||0, output_tokens: usage.completion_tokens||0},
+          usage: {input_tokens: usage.prompt_tokens||0, output_tokens: usage.completion_tokens||0, total_tokens: (usage.prompt_tokens||0)+(usage.completion_tokens||0)},
           status:"completed"
         };
         log("[glm] 回复: " + content.slice(0,60));
