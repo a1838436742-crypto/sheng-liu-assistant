@@ -345,3 +345,23 @@ ffmpeg -i video.mp4 -i audio.m4a -c:v copy -c:a aac -map 0:v:0 -map 1:a:0 -short
 - **config.toml 建议值**: `base_url = "http://127.0.0.1:57324/v1"`
 - **新增文件**: `deepseek-direct-server.js`, `switch-direct.ps1`
 
+
+
+## 铁律35: 配置恢复三原则 (2026-07-17 新增)
+- **保底脚本**: `recover-57321.ps1` → 一键恢复 `base_url = 57321`（codex++），清理冲突代理，启动 codex++
+- **备份不能直接覆盖**: 桌面 `config.toml` 备份可能有 `base_url = ""`（空字符串），直接覆盖会导致连不上任何 API
+- **恢复流程**: 运行保底脚本 → 重启 Codex → 确认对话正常，不行再手动检查 `config.toml` 的 `base_url` 字段
+
+## 铁律36: 中文路径.bat文件编码规则 (2026-07-17 新增)
+- **症状**: `.bat` 文件里的中文路径变成 `????`
+- **原因**: 用 UTF-8 写 `.bat` 文件，Windows 启动时会按系统默认编码（GBK）解析，导致中文乱码
+- **修复**: 用 PowerShell 的 `Set-Content -Encoding Default` 或记事本的 ANSI 保存
+- **检查**: 从 Startup 文件夹读 `.bat` 内容，确认中文显示正常
+
+## 铁律37: 开机自启三件套 (2026-07-17 新增)
+- **Startup 文件夹**（本机）有三个自启项：
+  - `CodexPlusPlusWatcher.lnk` → codex++（端口 57321，带 provider-sync 自动同步 config.toml）
+  - `DeepSeekDirect.bat` → deepseek-direct-server.js（端口 57324，注意编码规则铁律36）
+  - `FixPlugins.lnk` → `fix-plugins-on-startup.ps1`（修复插件列表，同时启动 57324）
+- **冲突说明**: 57321 和 57324 同时运行时不冲突，但 `config.toml` 只能指向一个
+- **provider-sync**: codex++ 的自动同步会覆盖 `config.toml`，备份在 `.codex\\backups\\codex-plus-live-*`
