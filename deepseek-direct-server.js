@@ -2,7 +2,6 @@
 // node deepseek-direct-server.js → 监听 57324 → api.deepseek.com
 var http = require("http");
 var https = require("https");
-var http = require("http");
 var fs = require("fs");
 var path = require("path");
 
@@ -75,6 +74,7 @@ function callDS(mgs, opts) {
 }
 
 var server=http.createServer(function(req,res){
+  req.setTimeout(300000);
   var chunks=[]; req.on("data",function(c){chunks.push(c)});
   req.on("end",async function(){
     try{
@@ -104,7 +104,7 @@ var server=http.createServer(function(req,res){
           res.writeHead(200,{"Content-Type":"text/event-stream","Cache-Control":"no-cache","Connection":"keep-alive"});
           res.write("event: response.created\ndata: "+JSON.stringify({type:"response.created",response:{id:rid,object:"response",model:model,status:"in_progress"}})+"\n\n");
           var fc="",usage={}, buf=Buffer.from(JSON.stringify({model:"deepseek-chat",messages:msgs,max_tokens:p.max_output_tokens||4096,temperature:p.temperature??0.7,stream:true}));
-          var r=https.request({hostname:HOST,path:"/chat/completions",method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+KEY,"Content-Length":buf.length},timeout:180000},
+          var r=https.request({hostname:HOST,path:"/chat/completions",method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+KEY,"Content-Length":buf.length},timeout:300000},
             function(sr){var b="";sr.on("data",function(c){b+=c.toString();var ls=b.split("\n");b=ls.pop()||"";ls.forEach(function(l){l=l.trim();if(!l||!l.startsWith("data: "))return;if(l.slice(6)==="[DONE]")return;try{var j=JSON.parse(l.slice(6)),d=j.choices?.[0]?.delta?.content||"";if(d){fc+=d;res.write("event: response.output_text.delta\ndata: "+JSON.stringify({type:"response.output_text.delta",delta:d,index:0})+"\n\n")}if(j.usage)usage=j.usage}catch(e){}})});sr.on("end",function(){var u=usage||{};res.write("event: response.completed\ndata: "+JSON.stringify({type:"response.completed",response:{id:rid,object:"response",model:model,status:"completed",output:[{type:"message",role:"assistant",content:[{type:"output_text",text:fc}]}],usage:{input_tokens:u.prompt_tokens||0,output_tokens:u.completion_tokens||0,total_tokens:(u.prompt_tokens||0)+(u.completion_tokens||0)}}})+"\n\n");res.end()})});
           r.on("error",function(e){res.write("event: error\ndata: "+JSON.stringify({type:"error",error:{message:e.message}})+"\n\n");res.end()});
           r.write(buf);r.end();
